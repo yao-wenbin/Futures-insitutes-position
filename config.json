@@ -1,0 +1,8 @@
+{
+  "xlsm": "机构持仓表.xlsm",
+  "out_dir": "../输出",
+  "write_sheet": true,
+  "meal_code": "M2701",
+  "meal05_code": "M2705",
+  "rape_code": "RM2701"
+}

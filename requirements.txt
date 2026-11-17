@@ -1,0 +1,4 @@
+openpyxl>=3.0
+matplotlib>=3.5
+pillow>=9.0
+pywin32>=305
