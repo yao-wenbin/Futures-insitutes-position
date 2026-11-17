@@ -25,10 +25,7 @@ import re
 import sys
 from datetime import date, datetime
 
-MEAL_GROUP1 = ["高盛", "摩根"]                 # 高盛 + 摩根（单独合计）
-MEAL_GROUP_MAIN = ["高盛", "摩根", "中粮"]      # 豆粕逐个列出的机构
-MEAL_GROUP2 = ["国泰君安", "东证", "中信"]      # 国泰 + 东证 + 中信
-RAPE_GROUP = ["高盛", "摩根", "中粮"]
+# 机构顺序与合计组合不再硬编码，统一由 config.json 的 objects 决定（见 build）
 
 ALIASES = {
     "高盛期货": "高盛", "高盛": "高盛",
@@ -170,19 +167,52 @@ def ct_label(v, default):
     return m.group(1) if m else s
 
 
-def build(data):
-    meal = load_section(data.get("meal") or data.get("豆粕"), "豆粕",
-                        set(MEAL_GROUP_MAIN + MEAL_GROUP2))
-    rape = load_section(data.get("rapeseed") or data.get("菜粕"), "菜粕",
-                        set(RAPE_GROUP))
-    raw5 = data.get("meal05") or data.get("豆粕05")
-    meal5 = None
-    if raw5:
-        meal5 = load_section(raw5, "豆粕05", set(MEAL_GROUP_MAIN + MEAL_GROUP2))
-    contracts = data.get("contracts") or {}
-    meal_ct = ct_label(contracts.get("meal") or data.get("meal_contract"), "2701")
-    meal5_ct = ct_label(contracts.get("meal05") or data.get("meal05_contract"), "2705")
-    rape_ct = ct_label(contracts.get("rapeseed") or data.get("rapeseed_contract"), "2701")
+def variety_of(obj):
+    """对象显示名去掉末尾数字：豆粕01 → 豆粕。"""
+    name = str(obj.get("name") or "")
+    return re.sub(r"\d+$", "", name).strip() or name
+
+
+def block(store, orgs_order, combos, flag, flag_comb):
+    """一个合约的正文：按 orgs_order 逐行，combo 在 after 之后插合计行，无 after 的放段末。"""
+    after_map = {}
+    tail_combos = []
+    for c in combos:
+        members = [m for m in (c.get("members") or []) if m]
+        if len(members) < 2:
+            continue
+        label = c.get("label") or " + ".join(members)
+        after = c.get("after")
+        if after:
+            after_map.setdefault(after, []).append((label, members))
+        else:
+            tail_combos.append((label, members))
+
+    def need(name):
+        if name not in store:
+            die("数据缺少「{}」，无法生成报告".format(name))
+        return store[name]
+
+    out = []
+    for org in orgs_order:
+        out.append(single_line(need(org), flag))
+        for label, members in after_map.get(org, []):
+            out.append(combined_line(label, [need(m) for m in members], flag_comb))
+    for label, members in tail_combos:
+        out.append(combined_line(label, [need(m) for m in members], flag_comb))
+    return out
+
+
+def build(data, group=None):
+    objs = data.get("objects")
+    if group:
+        key = str(group).strip()
+        objs = [o for o in (objs or [])
+                if key in (o.get("group"), o.get("group_name"))]
+    if not objs:
+        if group:
+            die("分组 {} 在 JSON 里没有合约数据".format(group))
+        die("JSON 缺少 objects 数组：请用新版 fetch_positions.py 取数（合约/机构由 config.json 配置）")
 
     d = data.get("date")
     if d:
@@ -195,65 +225,57 @@ def build(data):
 
     flag = bool(data.get("flag_over_10", True))
     flag_comb = bool(data.get("flag_combined", False))
-
-    missing = [n for n in MEAL_GROUP_MAIN + MEAL_GROUP2 if n not in meal]
-    if missing and not data.get("allow_missing"):
-        die("豆粕缺这些机构：{}（如确实没有该机构，设 allow_missing=true）".format(
-            "、".join(missing)))
-    missing2 = [n for n in RAPE_GROUP if n not in rape]
-    if missing2 and not data.get("allow_missing"):
-        die("菜粕缺这些机构：{}".format("、".join(missing2)))
-    if meal5 is not None:
-        missing5 = [n for n in MEAL_GROUP_MAIN + MEAL_GROUP2 if n not in meal5]
-        if missing5 and not data.get("allow_missing"):
-            die("豆粕05缺这些机构：{}".format("、".join(missing5)))
-
-    def need(store, name):
-        if name not in store:
-            die(f"接口数据缺少「{name}」，无法生成报告")
-        return store[name]
-
-    def block(store):
-        """一个合约的 7 行：高盛/摩根/中粮 + 高盛+摩根合计 + 国泰/东证/中信 + 三家合计。"""
-        out = [single_line(need(store, n), flag) for n in MEAL_GROUP_MAIN]
-        out.append(combined_line("高盛 + 摩根",
-                                 [need(store, n) for n in MEAL_GROUP1], flag_comb))
-        out.extend(single_line(need(store, n), flag) for n in MEAL_GROUP2)
-        out.append(combined_line("国泰 + 东证 + 中信",
-                                 [need(store, n) for n in MEAL_GROUP2], flag_comb))
-        return out
-
-    sections = [("豆粕 {} 合约（主力）".format(meal_ct), block(meal))]
-    if meal5 is not None:
-        sections.append(("豆粕 {} 合约".format(meal5_ct), block(meal5)))
-    rape_lines = [single_line(need(rape, n), flag) for n in RAPE_GROUP]
-    rape_lines.append(combined_line("高盛 + 摩根",
-                                    [need(rape, n) for n in RAPE_GROUP[:2]], flag_comb))
-    sections.append(("菜粕 {} 合约".format(rape_ct), rape_lines))
+    allow_missing = bool(data.get("allow_missing"))
 
     lines = ["{} 月 {} 日持仓变化".format(dd.month, dd.day)]
-    for i, (title, body) in enumerate(sections):
-        lines.append("{}、{}：".format("一二三四五"[i], title))
-        lines.extend(body)
+    numerals = "一二三四五六七八九十"
+    for i, obj in enumerate(objs):
+        name = obj.get("name") or obj.get("contract") or "合约"
+        ct = ct_label(obj.get("contract"), "")
+        title = "{} {} 合约".format(variety_of(obj), ct) if ct else "{} 合约".format(variety_of(obj))
+        if obj.get("primary"):
+            title += "（主力）"
+        orgs_order = obj.get("orgs_order") or list((obj.get("orgs") or {}).keys())
+        store = load_section(obj.get("orgs") or {}, name, set(orgs_order))
+        missing = [n for n in orgs_order if n not in store]
+        if missing and not allow_missing:
+            die("{} 缺这些机构：{}（如确实没有该机构，设 allow_missing=true）".format(
+                name, "、".join(missing)))
+        lines.append("{}、{}：".format(numerals[i] if i < len(numerals) else str(i + 1), title))
+        lines.extend(block(store, orgs_order, obj.get("combos") or [], flag, flag_comb))
     return "\n".join(lines)
 
 
 SELF_TEST_DATA = {
     "date": "2025-05-11",
-    "contracts": {"meal": "2601", "rapeseed": "2701"},
-    "meal": {
-        "高盛期货": {"side": "long", "cum": 66570, "chg": 17124},
-        "摩根大通": {"side": "short", "cum": 26855, "chg": -13842},
-        "中粮期货": {"side": "short", "cum": 463034, "chg": 6637},
-        "国泰君安": {"side": "long", "cum": 145360, "chg": 11241},
-        "东证期货": {"side": "long", "cum": 86913, "chg": -8536},
-        "中信期货": {"side": "long", "cum": 26218, "chg": 18042},
-    },
-    "rapeseed": {
-        "高盛": {"side": "long", "cum": 38043, "chg": 3302},
-        "摩根": {"side": "short", "cum": 17397, "chg": -3701},
-        "中粮": {"side": "short", "cum": 48623, "chg": 1680},
-    },
+    "objects": [
+        {
+            "contract": "M2601", "name": "豆粕01", "primary": True,
+            "orgs_order": ["高盛", "摩根", "中粮", "国泰君安", "东证", "中信"],
+            "combos": [
+                {"members": ["高盛", "摩根"], "after": "中粮", "label": "高盛 + 摩根"},
+                {"members": ["国泰君安", "东证", "中信"], "label": "国泰 + 东证 + 中信"},
+            ],
+            "orgs": {
+                "高盛期货": {"side": "long", "cum": 66570, "chg": 17124},
+                "摩根大通": {"side": "short", "cum": 26855, "chg": -13842},
+                "中粮期货": {"side": "short", "cum": 463034, "chg": 6637},
+                "国泰君安": {"side": "long", "cum": 145360, "chg": 11241},
+                "东证期货": {"side": "long", "cum": 86913, "chg": -8536},
+                "中信期货": {"side": "long", "cum": 26218, "chg": 18042},
+            },
+        },
+        {
+            "contract": "RM2701", "name": "菜粕01", "primary": False,
+            "orgs_order": ["高盛", "摩根", "中粮"],
+            "combos": [{"members": ["高盛", "摩根"], "label": "高盛 + 摩根"}],
+            "orgs": {
+                "高盛": {"side": "long", "cum": 38043, "chg": 3302},
+                "摩根": {"side": "short", "cum": 17397, "chg": -3701},
+                "中粮": {"side": "short", "cum": 48623, "chg": 1680},
+            },
+        },
+    ],
 }
 
 SELF_TEST_EXPECT = [
@@ -296,19 +318,34 @@ def self_test():
     # 合计为净空时，增减要按「空增/空减」表达（2026-10-28 实盘数据回归）
     net_short = {
         "date": "2026-10-28",
-        "meal": {
-            "高盛": {"side": "long", "cum": 114312, "chg": -5396},
-            "摩根": {"side": "short", "cum": 52571, "chg": 5494},
-            "中粮": {"side": "short", "cum": 331646, "chg": -5213},
-            "国泰君安": {"side": "long", "cum": 52142, "chg": -4963},
-            "东证": {"side": "short", "cum": 10666, "chg": -3518},
-            "中信": {"side": "long", "cum": 109258, "chg": 5990},
-        },
-        "rapeseed": {
-            "高盛": {"side": "short", "cum": 62705, "chg": 5665},
-            "摩根": {"side": "short", "cum": 8461, "chg": 6914},
-            "中粮": {"side": "short", "cum": 28665, "chg": -8725},
-        },
+        "objects": [
+            {
+                "contract": "M2701", "name": "豆粕01", "primary": True,
+                "orgs_order": ["高盛", "摩根", "中粮", "国泰君安", "东证", "中信"],
+                "combos": [
+                    {"members": ["高盛", "摩根"], "after": "中粮", "label": "高盛 + 摩根"},
+                    {"members": ["国泰君安", "东证", "中信"], "label": "国泰 + 东证 + 中信"},
+                ],
+                "orgs": {
+                    "高盛": {"side": "long", "cum": 114312, "chg": -5396},
+                    "摩根": {"side": "short", "cum": 52571, "chg": 5494},
+                    "中粮": {"side": "short", "cum": 331646, "chg": -5213},
+                    "国泰君安": {"side": "long", "cum": 52142, "chg": -4963},
+                    "东证": {"side": "short", "cum": 10666, "chg": -3518},
+                    "中信": {"side": "long", "cum": 109258, "chg": 5990},
+                },
+            },
+            {
+                "contract": "RM2701", "name": "菜粕01",
+                "orgs_order": ["高盛", "摩根", "中粮"],
+                "combos": [{"members": ["高盛", "摩根"], "label": "高盛 + 摩根"}],
+                "orgs": {
+                    "高盛": {"side": "short", "cum": 62705, "chg": 5665},
+                    "摩根": {"side": "short", "cum": 8461, "chg": 6914},
+                    "中粮": {"side": "short", "cum": 28665, "chg": -8725},
+                },
+            },
+        ],
     }
     txt2 = build(net_short)
     for exp in ["高盛 + 摩根当日净多 -10890，合计净多：61741",
@@ -318,8 +355,19 @@ def self_test():
             ok = False
             print("✗ 净空合计回归失败，缺：", exp)
     # 加入豆粕05 后，段落编号要顺延：二、豆粕 2705，三、菜粕 2701
-    with5 = dict(SELF_TEST_DATA)
-    with5["meal05"] = dict(SELF_TEST_DATA["meal"])
+    import copy
+    m5 = copy.deepcopy(SELF_TEST_DATA["objects"][0])
+    m5["contract"] = "M2705"
+    m5["name"] = "豆粕05"
+    m5["primary"] = False
+    with5 = {
+        "date": SELF_TEST_DATA["date"],
+        "objects": [
+            copy.deepcopy(SELF_TEST_DATA["objects"][0]),
+            m5,
+            copy.deepcopy(SELF_TEST_DATA["objects"][1]),
+        ],
+    }
     body5 = build(with5).split("\n")
     for exp in ["一、豆粕 2601 合约（主力）：", "二、豆粕 2705 合约：",
                 "三、菜粕 2701 合约："]:
@@ -329,6 +377,25 @@ def self_test():
     if "二、菜粕 2701 合约：" in body5:
         ok = False
         print("✗ 含豆粕05 时菜粕不该再是「二、」")
+    # 分组过滤：只保留目标分组的合约，编号从「一、」重新开始
+    grp = copy.deepcopy(with5)
+    for o in grp["objects"]:
+        o["group"] = "meal_rape"
+        o["group_name"] = "豆粕菜粕"
+    grp["objects"][1]["group"] = "soy_only"
+    grp["objects"][1]["group_name"] = "大豆"
+    bodyg = build(grp, group="soy_only")
+    if "一、豆粕 2705 合约：" not in bodyg:
+        ok = False
+        print("✗ 分组过滤后缺「一、豆粕 2705 合约：」")
+    for bad in ["豆粕 2601 合约", "菜粕 2701 合约"]:
+        if bad in bodyg:
+            ok = False
+            print("✗ 分组过滤后不该出现：", bad)
+    bodygn = build(grp, group="豆粕菜粕")
+    if "菜粕 2701 合约" not in bodygn or "豆粕 2705 合约" in bodygn:
+        ok = False
+        print("✗ 按分组名称过滤结果不对")
 
     if not ok:
         print("\n--- 实际输出 ---\n" + txt)
@@ -341,6 +408,7 @@ def main():
     ap = argparse.ArgumentParser(description="机构持仓报告生成器")
     ap.add_argument("json", nargs="?", help="数据 JSON 路径，- 表示从标准输入读")
     ap.add_argument("--date", help="覆盖日期 YYYY-MM-DD（默认取 JSON 或今天）")
+    ap.add_argument("--group", help="只生成指定分组的报告（分组 id 或名称，如 meal_rape / 豆粕菜粕）")
     ap.add_argument("--flag-combined", action="store_true",
                     help="合计行也标注超 10%% 的增减占比")
     ap.add_argument("--no-flag", action="store_true", help="不做 10%% 标注")
@@ -366,8 +434,14 @@ def main():
     if args.no_flag:
         data["flag_over_10"] = False
 
-    print(build(data))
+    print(build(data, group=args.group))
 
 
 if __name__ == "__main__":
+    # Windows 控制台默认 GBK，直接 reconfigure 避免 ✅/❌ 等字符报错
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     main()

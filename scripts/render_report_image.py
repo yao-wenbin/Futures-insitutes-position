@@ -3,9 +3,10 @@
 
 用法：
   python render_report_image.py <positions.json> [--out 路径] [--date YYYY-MM-DD]
+  python render_report_image.py <positions.json> --group meal_rape
   python render_report_image.py --text-file 报告.txt [--out 路径]
 
-不指定 --out 时输出到 图表数据/机构持仓报告_YYYYMMDD.png。
+不指定 --out 时输出到 图表数据/机构持仓报告_YYYYMMDD[_分组名].png。
 字体用微软雅黑（C:/Windows/Fonts/msyh*.ttc），缺字体时退回系统默认中文字体。
 """
 import argparse
@@ -151,6 +152,8 @@ def main():
     ap.add_argument("--text-file", help="直接给报告文字文件（跳过 json）")
     ap.add_argument("--out", default=None, help="输出 PNG 路径")
     ap.add_argument("--date", default=None, help="数据日 YYYY-MM-DD，用于文件名与页脚")
+    ap.add_argument("--group", default=None,
+                    help="只出指定分组（config.json 的分组 id 或名称）")
     a = ap.parse_args()
 
     if a.text_file:
@@ -164,7 +167,7 @@ def main():
         sys.path.insert(0, HERE)
         import compute_report
         data = json.load(open(a.json, encoding="utf-8"))
-        text = compute_report.build(data)
+        text = compute_report.build(data, group=a.group)
         d = a.date or data.get("date")
     else:
         sys.exit("需要 json 或 --text-file")
@@ -173,7 +176,16 @@ def main():
     stamp = dd.strftime("%Y%m%d")
     footer = "数据来源：东方财富龙虎榜 · 数据日 {}".format(dd.strftime("%Y-%m-%d"))
 
-    out = a.out or os.path.join(OUT_DIR, "机构持仓报告_{}.png".format(stamp))
+    label = ""
+    if a.group:
+        try:
+            sys.path.insert(0, HERE)
+            import config_loader
+            label = config_loader.group_name(config_loader.load_config(), a.group)
+        except Exception:
+            label = str(a.group)
+    suffix = "_{}".format(label) if label else ""
+    out = a.out or os.path.join(OUT_DIR, "机构持仓报告_{}{}.png".format(stamp, suffix))
     items = parse_report(text)
     size = render(items, footer, out)
     print(text)

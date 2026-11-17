@@ -1,8 +1,70 @@
 {
-  "xlsm": "机构持仓表.xlsm",
+  "data_dir": "data",
   "out_dir": "../输出",
-  "write_sheet": true,
-  "meal_code": "M2701",
-  "meal05_code": "M2705",
-  "rape_code": "RM2701"
+  "groups": [
+    {
+      "id": "meal_rape",
+      "name": "豆粕菜粕",
+      "objects": [
+        {
+          "contract": "M2701",
+          "name": "豆粕01",
+          "primary": true,
+          "orgs": ["高盛", "摩根", "中粮", "国泰君安", "东证", "中信"],
+          "combos": [
+            { "members": ["高盛", "摩根"], "after": "中粮", "label": "高盛 + 摩根" },
+            { "members": ["国泰君安", "东证", "中信"], "label": "国泰 + 东证 + 中信" }
+          ],
+          "chart_orgs": ["高盛", "摩根", "国泰君安", "东证", "中信"]
+        },
+        {
+          "contract": "M2705",
+          "name": "豆粕05",
+          "primary": false,
+          "orgs": ["高盛", "摩根", "中粮", "国泰君安", "东证", "中信"],
+          "combos": [
+            { "members": ["高盛", "摩根"], "after": "中粮", "label": "高盛 + 摩根" },
+            { "members": ["国泰君安", "东证", "中信"], "label": "国泰 + 东证 + 中信" }
+          ],
+          "chart_orgs": ["高盛", "摩根", "国泰君安", "东证", "中信"]
+        },
+        {
+          "contract": "RM2701",
+          "name": "菜粕01",
+          "primary": true,
+          "orgs": ["高盛", "摩根", "中粮"],
+          "combos": [
+            { "members": ["高盛", "摩根"], "label": "高盛 + 摩根" }
+          ],
+          "chart_orgs": ["高盛", "摩根", "中粮"]
+        }
+      ]
+    },
+    {
+      "id": "palm",
+      "name": "棕榈油",
+      "objects": [
+        {
+          "contract": "P2701",
+          "name": "棕榈油01",
+          "primary": true,
+          "orgs": ["高盛", "摩根", "中粮"],
+          "combos": [
+            { "members": ["高盛", "摩根"], "label": "高盛 + 摩根" }
+          ],
+          "chart_orgs": ["高盛", "摩根", "中粮"]
+        },
+        {
+          "contract": "P2705",
+          "name": "棕榈油05",
+          "primary": false,
+          "orgs": ["高盛", "摩根", "中粮"],
+          "combos": [
+            { "members": ["高盛", "摩根"], "label": "高盛 + 摩根" }
+          ],
+          "chart_orgs": ["高盛", "摩根", "中粮"]
+        }
+      ]
+    }
+  ]
 }
