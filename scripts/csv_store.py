@@ -95,6 +95,37 @@ def read_csv(path):
     return sorted(set(dates)), data
 
 
+def read_header(path):
+    """读 CSV 表头（去掉「日期」列）；文件不存在返回 []。"""
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        row = next(csv.reader(f), [])
+    return [h.strip() for h in row[1:] if h.strip()]
+
+
+def merge_columns(existing, wanted, combos=None):
+    """保留 CSV 已有列（历史机构），把 wanted 里新增的列插在合计列之前。
+
+    用于「机构换人但历史不丢」：如棕榈油 CSV 老列为
+    高盛/摩根/中粮/高盛+摩根，新配置为 高盛/摩根/中信，合并后
+    高盛/摩根/中粮/中信/高盛+摩根，老「中粮」历史值原样保留。
+    """
+    combo_cols = {(c.get("column") or "+".join(c.get("members") or []))
+                  for c in (combos or [])}
+    cols = [c for c in (existing or []) if c]
+    insert_at = len(cols)
+    for i, c in enumerate(cols):
+        if c in combo_cols:
+            insert_at = i
+            break
+    for c in (wanted or []):
+        if c and c not in cols:
+            cols.insert(insert_at, c)
+            insert_at += 1
+    return cols
+
+
 def write_csv(path, dates, data, orgs):
     """按「行 = 日期、列 = 机构」写出 CSV（dates 应已升序）。"""
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -156,6 +187,8 @@ def upsert_day(csv_path, day, values, columns, combos=None, force=False):
         data.setdefault(org, {})[ds] = int(v)
 
     recompute_combos(data, combos or [], ds)
+    # 保留 CSV 里已有但本次 config 未包含的机构列（历史不丢），新列插在合计列前
+    columns = merge_columns(read_header(csv_path), list(columns), combos)
     write_csv(csv_path, dates, data, columns)
     return ("updated" if existed else "added"), {"need_create": not existed}
 

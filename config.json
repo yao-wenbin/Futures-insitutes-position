@@ -48,21 +48,21 @@
           "contract": "P2701",
           "name": "棕榈油01",
           "primary": true,
-          "orgs": ["高盛", "摩根", "中粮"],
+          "orgs": ["高盛", "摩根", "中信"],
           "combos": [
             { "members": ["高盛", "摩根"], "label": "高盛 + 摩根" }
           ],
-          "chart_orgs": ["高盛", "摩根", "中粮"]
+          "chart_orgs": ["高盛", "摩根", "中信"]
         },
         {
           "contract": "P2705",
           "name": "棕榈油05",
           "primary": false,
-          "orgs": ["高盛", "摩根", "中粮"],
+          "orgs": ["高盛", "摩根", "中信"],
           "combos": [
             { "members": ["高盛", "摩根"], "label": "高盛 + 摩根" }
           ],
-          "chart_orgs": ["高盛", "摩根", "中粮"]
+          "chart_orgs": ["高盛", "摩根", "中信"]
         }
       ]
     }
